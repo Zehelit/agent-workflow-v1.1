@@ -1,29 +1,31 @@
-# AGWF çalışma yaşam döngüsü güvenilirliği
+# Lifecycle reliability specification
 
-## İstenen sonuç
+> Historical specification from 10 November 2026. The evidence and authorization below apply to that earlier work. See the [current operations contract](../../../skills/agent-workflow-v1-1/references/operations.md) for present behavior.
 
-İlk etkinleştirme, gerçek ölçüm yenileme, teknik kesintiden toparlanma ve doğal kapanış güvenilir olsun. Test hazırlığı hedef çalışırken üretilmesin; başlangıç başarısı, durmuş çalışma kaydından devam başarısı ve zamanlama başarısı ayrı kanıtlarla raporlansın.
+## Intended result
 
-## Mevcut kanıt ve sınırları
+Make first activation, usage refresh, recovery and normal completion reliable. Prepare the test before the target runs. Report startup, recovery from a halted workflow and timing as separately observed outcomes.
 
-- `reports/goal-live-test/live-test-result.json`: İlk başlangıç, eskimiş ölçüm nedeniyle etkinleşmeden SAVE verdi. Zamanlama 98,74 ve 45,05 saniyeydi; iki 10 saniyelik tur da başarısız. İkinci turdaki yeni izleme dönemi ve ilk bağlama, etkinleşmiş/halted helper'ın resume edildiğini kanıtlamıyor.
-- `reports/goal-normal-flow/verification.json`: Sağlıklı başlangıç, 43,423 saniye sonra ikinci gerçek ölçüm, doğrulanmış checkpoint ve doğal complete/worker çıkışı geçti. Bu koşumda yapay duruş veya SAVE kilidi yoktu.
-- `scripts/candidate.py`: Teknik epoch açma ve başarısız yeniden başlatmanın kontrolünü geri koyma yolu `resume` için var; ilk `activate`/`bind-active-goal` başarısızlığı aynı kayıt ve yeniden deneme sözleşmesine sahip değil. Taze ölçümle ilk etkinleştirmeyi tekrar denemenin davranışı regresyon testiyle kanıtlanacak.
-- İzin/yönerge çelişkileri ile dört test yardımcısı/bekleme hatası önceki bakımda düzeltildi. Bunlar yeniden tasarım değil, korunacak regresyonlardır.
+## Evidence available at the time
 
-## Gereksinimler
+- The original private timed report recorded an expired measurement before activation. Both ten-second trials failed at 98.74 and 45.05 seconds. A fresh epoch and first binding in the second trial did not demonstrate resume from a previously halted helper.
+- A separate private normal-flow report recorded healthy startup, a second real reading 43.423 seconds later, a verified checkpoint, normal completion and worker exit. That run did not exercise a SAVE latch.
+- At the time, `scripts/candidate.py` could open a new technical epoch and restore controls after a failed `resume`. First `activate` or `bind-active-goal` lacked the same retry journal. The implementation needed separate regression evidence.
+- Earlier maintenance corrected authority and instruction conflicts as well as four test helper and wait faults. Those behaviors were to remain covered by regression tests.
 
-1. Yalnız kaydedilmiş, aynı hedef/koşum kapsamındaki `usage_receipt_expired` başlangıç hatası; yeni gerçek ölçüm, gerçek aktif hedef gözlemi ve doğrulanmış worker yokluğuyla mevcut yetki altında tekrar denenebilsin. Yeni kullanıcı mesajı, yeni run açma veya kullanım verisi değiştirme gerekmesin.
-2. Gerçek kota/erken rezerv duruşu, kullanıcı duruşu, pasif hedef, bilinmeyen worker kimliği, değişmiş paket/kanıt veya farklı hedef bu yoldan aşılamasın. Python'un sağladığı şey biçim/tutarlılık kontrolüdür; kullanıcı ve araç kaynağını bağımsız doğruladığı iddia edilmesin.
-3. Başarısız denemeler izlenebilir olsun; yarım başlatma etkin workflow gibi görünmesin. Yeni bir gerçek SAVE kanıtı geri alınmasın veya silinmesin.
-4. Hazırlık ve paket kontrolleri gerçek ölçümden önce tamamlansın. Ölçüm gerçek araç yanıtı alınırken zamanlansın; dosya yazma zamanı eski ölçüme yeni tarih vermesin. `ingest` ile lease yenilemenin ayrı olduğu korunsun.
-5. Normal akış yapay duruş üretmesin. Gerçek karar `CHECKPOINT_SOON` ise checkpoint, gerçekten `SAVE_AND_STOP` ise koruma/toparlanma kuralları işletilsin.
-6. Etkin/halted workflow'dan gerçek native Continue ve teknik toparlanma, ilk bağlama başarısından ayrı kabul testleriyle kanıtlansın.
-7. Zamanlama testi yalnız açık test modunda çalışsın. Önceden hazırlanmış başlatıcı, gerçek native olay zamanını esas alsın. Hedef zamanı geçtikten sonra başlatılan veya hazırlığı yetişmeyen tur zamanlama başarısı sayılmasın. Önerilen canlı SAVE tetikleme toleransı 10 ± 1 saniyedir; gerçek değer her zaman yazılsın.
-8. Yerleşik goal araçları host üzerindeki ana ajan tarafından çağrılmaya devam etsin. Arka plan worker'ına uydurma host-tool erişimi, özel Codex taşıması veya kimlik bilgisi okuma yolu eklenmesin. Resmî olay kaynağı bulunmadan arayüz tıklamasından itibaren kesin zaman garantisi verilmesin.
-9. Kaydetme, worker çıkışı, workflow complete ve native goal complete ayrı durumlar olarak doğrulansın. Kullanıcı açıkça istemedikçe hedef duraklatılmasın; `blocked` native aracın gerçek koşullarıyla sınırlı olsun.
-10. Python 3.11+ ve standart kütüphane korunsun. Windows dosya paylaşımı hatalarında geçici kilit, süreç çıkışı veya başarı sayılmasın. Mevcut kirli/stage edilmiş çalışma ve eski kayıtlar korunarak paket güncellensin; eski run bağı sessizce yeniden yazılmasın.
+## Requirements
 
-## Yetki sınırı
+1. Retry a first startup under existing authority only for a recorded `usage_receipt_expired` failure in the same goal/run scope, with a genuine new usage reading, an actual active goal observation and verified worker absence. This path should need no new user quote, run identity or rewritten usage data.
+2. Reject quota, early reserve, user stop, a nonactive goal, uncertain process ownership, changed package or evidence, and a different goal. Python checks consistency and format. It does not independently authenticate the person or tool identified by the caller.
+3. Keep failed attempts observable. A partially initialized run must not appear active. Preserve subsequent real SAVE evidence.
+4. Prepare the package and test before taking the first measurement. Store the actual observation timestamp. A newer file write cannot refresh an older reading. Keep `ingest` and lease renewal distinct.
+5. Normal operation should let real decisions drive `CHECKPOINT_SOON` and `SAVE_AND_STOP`. It should not inject a stop.
+6. Demonstrate native Continue and recovery from a genuinely active then halted workflow apart from first-time binding.
+7. Run the timed diagnosis only when selected. Prepare its harness before the real native event. Late observations or preparation that misses the deadline cannot pass. The proposed tolerance was 10 ± 1 seconds for requesting SAVE, with the actual timing reported.
+8. The main agent continues to call native goal tools on the host. Do not add undocumented host access, a private Codex transport or credential reading for the background worker. Exact timing from a UI click would require an actual native event source.
+9. Verify checkpoint, worker exit, helper completion and native goal completion independently. Pause only with the user's authorization and use `blocked` only when the native goal tool's criteria apply.
+10. Keep Python 3.11+ and the standard library. A Windows sharing failure is not evidence of process exit or success. Preserve existing local edits and old runtime records. Do not rewrite their bindings.
 
-Belgenin ilk hazırlanması yalnız planlama kapsamındaydı. Kullanıcı daha sonra planın uygulanmasını, v1.1 kaynak commit/push işlemini ve depo belgelerinin yenilenmesini açıkça yetkilendirdi; GitHub Release veya tag oluşturulmayacak. Süreli canlı kesinti testi ayrı açık tanılama seçimi gerektirir. Kaynak değişiklikleri ve izole testler bu uygulama kapsamındadır; eski koşumların paket bağları sessizce taşınmaz.
+## Original authorization
+
+This document began as a planning task. The user later authorized the implementation, v1.1 source commit and push, and documentation refresh for that earlier task. A GitHub Release and tag were outside its scope. The live timed stop remained a separate diagnostic choice. Old run bindings were preserved.

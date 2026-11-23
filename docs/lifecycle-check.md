@@ -1,36 +1,36 @@
-# Tekrarlanabilir yaşam döngüsü kontrolü
+# Repeatable lifecycle check
 
-`tooling/run-lifecycle-check.py`, host araçlarının yerine geçmez. Ana ajan gerçek goal, kullanım ve alt ajan envanterini alır; araç bunları sabitlenmiş candidate üzerinden işler. Bir oturumun tek yazarı olmalıdır. Oturum ve girdi dosyalarını Git dışında, özel bir dizinde tutun.
+`tooling/run-lifecycle-check.py` processes real goal, usage and child-inventory observations through the pinned candidate. The main agent obtains those observations from the host. Keep the session and inputs private, outside Git, and give the session a single writer.
 
-## Hazırlık
+## Prepare before measuring
 
-Önce paketi üretip harici manifest pin'ini koruyun. `prepare` dosya bütünlüğünü kontrol eder ve yeni oturum dosyası yazar; candidate veya worker çalıştırmaz. Hazırlığı gerçek ölçümden önce bitirin.
+Build the candidate and preserve the accepted external pin. `prepare` checks the package and records a new session without launching the candidate or watcher. Finish preparation before collecting the real first usage reading.
 
 ```powershell
 python -X utf8 -B tooling/run-lifecycle-check.py prepare --candidate C:/build/agent-workflow-v1-1/scripts/candidate.py --manifest C:/build/agent-workflow-v1-1/manifest.json --manifest-sha256 PRESERVED_SHA256 --version 1.1 --project C:/project --run-id check-1 --session C:/private/check-1.json
 ```
 
-`PRESERVED_SHA256` kabul edilen build receipt'indeki gerçek değerdir. Proje dizini mevcut, oturum dosyası yeni olmalıdır. Kaynağı veya paketi değiştirdikten sonra aynı oturumu farklı pin'e yeniden bağlamayın.
+`PRESERVED_SHA256` comes from the accepted build receipt. Use an existing project and a new session file. After a package change, do not rebind an old session to a different pin.
 
-## Host girdi nesnesi
+## Host input object
 
-`run`, `observe`, `resume`, `close` ve `timed-test` komutları `--input` ile JSON nesnesi alır:
+`run`, `observe`, `resume`, `close` and `timed-test` accept a JSON object through `--input`.
 
-| Alan | İçerik |
-|---|---|
-| `activation` | Yalnız ilk `run` için, candidate `bind-active-goal` komutunun tam typed payload'u. `native_binding`, eşleşen `app_goal_observation`, objective, yorumlama/procedural kontrol, gerçekten gözlenmiş model/effort listesi, slot limiti, gerçek inventory ve gözlem zamanı. |
-| `app_goal_observation` | Gerçek `get_goal` gözlemi: goal/thread kimliği, objective, goal oluşturma zamanı, status, `source_kind: get_goal`, gerçek kaynak referansı ve `observed_at`; varsa gerçek `updated_at`. |
-| `usage` | [Native receipt sözleşmesindeki](../skills/agent-workflow-v1-1/references/native-usage.md) `source`, `sourceId`, `observedAt`, `result`. Yalnız gerçek gerekli pencereleri saklayın. |
-| `inventory` | Gerçek güncel alt ajan kimlik/durum listesi. Gerçekten alt ajan yoksa `[]`. |
-| `checkpoint_files` | Ana ajanın yazdığı dahil kurtarılacak tam proje-relative dosyalar; silinen yolları da ekleyin. Task claim'leri core tarafından ayrıca kapsanır. |
-| `writers_quiescent` | Snapshot öncesinde bütün yazıcıların durduğunu host gerçekten doğruladıysa `true`. Araç bu gözlemi kendi başına üretemez. |
-| `next_action` | Kurtarma veya doğal kapanış sonrası anlamlı sonraki adım. |
-| `weekly_exception` | İsteğe bağlı, yalnız ilk `run`: kullanıcının gerçek `exact_quote` değeri ve sınırlı `valid_until` Unix zamanı. Varsayılan bir istisna yoktur. |
-| `resume` | İsteğe bağlı, tam candidate resume payload'u. Yoksa yalnız kaydedilmiş ölçüm eskimesi için `usage_recovery: true` denenir. Gerçek kota/kullanıcı duruşları bundan yetki kazanmaz. |
+| Field | Contents |
+| --- | --- |
+| `activation` | First `run` only. The full typed candidate payload for `bind-active-goal`, including `native_binding`, matching `app_goal_observation`, objective, interpretation, procedural check, observed models and efforts, slot limit, actual inventory and observation time. |
+| `app_goal_observation` | A current `get_goal` observation of goal and thread identity, objective, creation time and status, with `source_kind: get_goal`, a real source reference and `observed_at`. Include actual `updated_at` when available. |
+| `usage` | The `source`, `sourceId`, `observedAt` and `result` fields from [native usage receipts](../skills/agent-workflow-v1-1/references/native-usage.md). Retain only the required windows. |
+| `inventory` | Real current child identities and statuses. Use `[]` only if there are no child agents. |
+| `checkpoint_files` | Project-relative changed, added and deleted paths to recover, including the main agent's files. The core also includes task file claims. |
+| `writers_quiescent` | `true` only after observing that all writers stopped. The harness cannot create this observation. |
+| `next_action` | Meaningful next step after recovery or normal close. |
+| `weekly_exception` | Optional on first `run`. Actual user `exact_quote` and bounded Unix expiry `valid_until`. No exception is configured by default. |
+| `resume` | Optional full candidate resume payload. Otherwise the harness tries `usage_recovery: true` only for recorded measurement expiry. Quota and user stops keep their separate requirements. |
 
-Native API ayrı goal kimliği vermiyorsa `threadId:createdAt` gibi türetilmiş bir kimlik kullanılabilir; bunun sağlayıcının verdiği kimlik olduğu iddia edilmez. Bütün çağrılarda aynı türetme ve gerçek kaynak zamanları korunmalıdır. Typed alanların ayrıntısı [operations](../skills/agent-workflow-v1-1/references/operations.md) ve [commands](../skills/agent-workflow-v1-1/references/commands.md) belgelerindedir.
+If the native API supplies no independent goal ID, use a consistently derived identity such as `threadId:createdAt` and label it as derived. See [operations](../skills/agent-workflow-v1-1/references/operations.md) and [commands](../skills/agent-workflow-v1-1/references/commands.md) for the typed contracts.
 
-## Normal akış
+## Run, refresh and close
 
 ```powershell
 python -X utf8 -B tooling/run-lifecycle-check.py run --session C:/private/check-1.json --input C:/private/initial-observation.json
@@ -38,30 +38,30 @@ python -X utf8 -B tooling/run-lifecycle-check.py observe --session C:/private/ch
 python -X utf8 -B tooling/run-lifecycle-check.py close --session C:/private/check-1.json --input C:/private/final-observation.json
 ```
 
-Ana ajan her gözlemi gerçek araç çağrısından hemen sonra kaydeder; dosya yazma zamanı ölçüm zamanı değildir. Araç `status.at == usage.observedAt`, canlı sahiplik, epoch, heartbeat, sample ve lease koşullarını birlikte doğrular. `observe` lease'i ayrıca yeniler. `refresh_by` gerçek karar son tarihini değiştirmeyen erken yenileme önerisidir.
+Record the actual observation time as soon as the native call returns. The harness checks `status.at == usage.observedAt`, owned worker identity, epoch, heartbeat, sample and lease. `observe` also renews the lease. `refresh_by` is an earlier refresh suggestion and leaves the actual deadline unchanged.
 
-`CHECKPOINT_SOON` anında ana ajan tamamlanmış işi kaydeder; `checkpoint_files` kapsamını doğru tutar. Doğal `close`, taze izleme, doğrulanmış snapshot, complete ve gerçek worker yokluğunu gerektirir. Normal mod yapay SAVE üretmez.
+At `CHECKPOINT_SOON`, verify a checkpoint for the finished work. Keep `checkpoint_files` current. Natural `close` requires fresh monitoring, verified snapshot, complete and observed worker exit. Normal operation does not inject a SAVE event.
 
-İlk `run` girdisinde `weekly_exception` varsa araç önce izleyicide süreli politikayı kurar ve `NEED_POLICY_OBSERVATION` döndürür. Workflow henüz etkinleşmez. Politikadan sonra yeni gerçek kullanım/goal gözlemi alıp aynı oturumda `run` çağrısını tekrar yapın; eski receipt'in zamanını değiştirmeyin.
+A first `run` with `weekly_exception` installs the bounded watcher policy and returns `NEED_POLICY_OBSERVATION` before workflow activation. Take a fresh goal and usage observation, then rerun the same session. Keep every previous receipt's original timestamp.
 
-## Teknik duruş ve devam
+## Halt and resume after expiry
 
-İzleyici SAVE istemişse `observe` stop → snapshot → halt yolunu uygular ve `NEED_POST_HALT_OBSERVATION` döndürür. Bundan sonra **yeni** goal, kullanım ve inventory gözlemi alın. Önceden alınmış girdiyi tekrar kullanmayın:
+When the watcher requests SAVE, `observe` applies stop, snapshot and halt, then returns `NEED_POST_HALT_OBSERVATION`. Obtain new goal, usage and inventory observations after halt.
 
 ```powershell
 python -X utf8 -B tooling/run-lifecycle-check.py resume --session C:/private/check-1.json --input C:/private/after-halt-observation.json
 ```
 
-Core duruş nedenini kendi watcher kaydından denetler. Aynı aktif hedef, değişmemiş checkpoint ve dosyalar, duruştan sonra alınmış fresh gözlemler ve durmuş sahipli worker gereklidir. Gerçek kota/erken rezerv ve kullanıcı duruşları ayrı gerçek devam yetkisi ister. Araç native goal'u paused/blocked/active yapmaz.
+The core uses the observed watcher cause. Technical recovery requires the same authorized active goal, unchanged files and checkpoint, fresh post-halt evidence and verified owned-worker exit. Quota, early-reserve and explicit user stops require the applicable continuation. The harness does not change the native goal to paused, blocked or active.
 
-İlk başlangıç başarısızsa candidate'ın verdiği başlangıç denemesi hash'i oturum dosyasına saklanır. Yeni gözlemle aynı `run` komutu tekrar kullanılabilir. Oturum dosyası harici kanıt kaydının parçasıdır; değiştirilmiş dosyayı yeniden onaylanmış saymayın. Tamamlanmış veya belirsiz deneme otomatik yeniden başlatılmaz.
+For a failed first activation, the session retains the candidate's startup-attempt hash. Use the same `run` with new evidence only under the supported retry conditions. A modified session is not accepted evidence. Completed and uncertain attempts are not automatically restarted.
 
-## Açık süreli tanılama
+## Run a timed diagnosis only when selected
 
-Yalnız ayrıca seçilmiş testte `timed-test` kullanın. Worker olaydan önce hazırlanmış ve sağlıklı olmalıdır. Event JSON alanları: `event_id`, `goal_id`, `thread_id`, `source_id`, `event_at`, `observed_at`. Kaynak ve zamanlar gerçek native olaya dayanır.
+Prepare a healthy worker before the event and use `timed-test` only for the explicitly requested diagnosis. Event JSON carries `event_id`, `goal_id`, `thread_id`, `source_id`, `event_at` and `observed_at` from a real native observation.
 
 ```powershell
 python -X utf8 -B tooling/run-lifecycle-check.py timed-test --session C:/private/check-1.json --input C:/private/current-observation.json --event-input C:/private/native-event.json --delay-seconds 10 --tolerance-seconds 1
 ```
 
-Geç gelen olay `INVALID_TIMING` olur; bunu düzeltmek için derhal durdurup başarılı saymaz. Süre içindeki sonuç `SAVE_REQUEST_ON_TIME` yalnız SAVE isteğinin zamanını gösterir. Native pause zamanı/başarısı ayrı host gözlemidir; araç `native_pause_verified: false` ve `native_paused_at: null` bırakır. Tam canlı iki tur kabulünde gerçekten aktif → halted → gerçek devam → aktif sırası ve native durum kanıtı ayrıca tutulur. Sentetik test saatiyle geçen test, canlı arayüz kabulü değildir.
+A late event produces `INVALID_TIMING`. `SAVE_REQUEST_ON_TIME` means the SAVE request met the timing condition. Native pause needs separate host evidence, so the harness leaves `native_pause_verified: false` and `native_paused_at: null`. A complete live two-round check captures active, halted and then active after an actual authorized continuation on the same goal/run. A synthetic clock test exercises logic only.

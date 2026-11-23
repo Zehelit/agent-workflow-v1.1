@@ -1,0 +1,13 @@
+{
+  "description": "A Codex skill and Python runtime for goal-bound delegation, usage monitoring, and verified checkpoints and recovery.",
+  "topics": [
+    "agent-orchestration",
+    "checkpointing",
+    "codex",
+    "codex-skills",
+    "python",
+    "workflow",
+    "usage-monitoring",
+    "workflow-recovery"
+  ]
+}
