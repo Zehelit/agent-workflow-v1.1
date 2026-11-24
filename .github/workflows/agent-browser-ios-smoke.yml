@@ -25,10 +25,13 @@ jobs:
           export PATH="$root/node_modules/.bin:$PATH"
           agent-browser --version
           appium driver install xcuitest@10.10.0
-          device="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; rows=json.load(sys.stdin)["devices"]; print(next(d["udid"] for k in sorted(rows,reverse=True) if ".iOS-" in k for d in rows[k] if d["isAvailable"] and d["name"].startswith("iPhone")))')"
-          ab() { agent-browser --session platform-ios --provider ios --device "$device" --json "$@"; }
-          trap 'ab close || true; xcrun simctl shutdown "$device" 2>/dev/null || true' EXIT
-          ab device list
+          device_name="AGWF Safari Fixture $GITHUB_RUN_ID"
+          runtime=com.apple.CoreSimulator.SimRuntime.iOS-18-5
+          device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro
+          device="$(xcrun simctl create "$device_name" "$device_type" "$runtime")"
+          ab() { agent-browser --session platform-ios --provider ios --device "$device_name" --json "$@"; }
+          trap 'ab close || true; xcrun simctl shutdown "$device" 2>/dev/null || true; xcrun simctl delete "$device" 2>/dev/null || true' EXIT
+          ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
           ab open https://books.toscrape.com/
           ab snapshot -i
           heading="$(ab get text 'h1')"
@@ -40,3 +43,5 @@ jobs:
           printf '%s\n' "$category" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["data"]["text"] == "Travel"'
           ab screenshot "$root/travel.png"
           python3 -c 'import hashlib,pathlib,struct,sys; d=pathlib.Path(sys.argv[1]).read_bytes(); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert w>0 and h>0; print("AGWF_IOS_PNG",w,h,hashlib.sha256(d).hexdigest())' "$root/travel.png"
+          ab close
+          trap 'xcrun simctl shutdown "$device" 2>/dev/null || true; xcrun simctl delete "$device" 2>/dev/null || true' EXIT
