@@ -1,0 +1,42 @@
+name: Agent Browser iOS Safari smoke
+
+on:
+  push:
+    branches: [agwf-agent-browser-platform-test]
+
+permissions:
+  contents: read
+
+jobs:
+  ios-safari:
+    runs-on: macos-15
+    timeout-minutes: 14
+    steps:
+      - name: Read an open demo catalog in Mobile Safari
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d "$RUNNER_TEMP/agwf-ios.XXXXXX")"
+          export APPIUM_HOME="$root/appium"
+          export AGENT_BROWSER_SOCKET_DIR="$root/run"
+          node --version
+          xcodebuild -version
+          npm install --prefix "$root" --no-audit --no-fund agent-browser@0.43.0 appium@3.0.0
+          export PATH="$root/node_modules/.bin:$PATH"
+          agent-browser --version
+          appium driver install xcuitest@10.10.0
+          device="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; rows=json.load(sys.stdin)["devices"]; print(next(d["udid"] for k in sorted(rows,reverse=True) if ".iOS-" in k for d in rows[k] if d["isAvailable"] and d["name"].startswith("iPhone")))')"
+          ab() { agent-browser --session platform-ios --provider ios --device "$device" --json "$@"; }
+          trap 'ab close || true; xcrun simctl shutdown "$device" 2>/dev/null || true' EXIT
+          ab device list
+          ab open https://books.toscrape.com/
+          ab snapshot -i
+          heading="$(ab get text 'h1')"
+          printf '%s\n' "$heading"
+          printf '%s\n' "$heading" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["data"]["text"] == "All products"'
+          ab find text Travel click --exact
+          category="$(ab get text 'h1')"
+          printf '%s\n' "$category"
+          printf '%s\n' "$category" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["data"]["text"] == "Travel"'
+          ab screenshot "$root/travel.png"
+          python3 -c 'import hashlib,pathlib,struct,sys; d=pathlib.Path(sys.argv[1]).read_bytes(); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert w>0 and h>0; print("AGWF_IOS_PNG",w,h,hashlib.sha256(d).hexdigest())' "$root/travel.png"
