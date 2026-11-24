@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   ios-safari:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 14
     steps:
       - name: Read an open demo catalog in Mobile Safari
@@ -20,6 +20,7 @@ jobs:
           export APPIUM_HOME="$root/appium"
           export AGENT_BROWSER_SOCKET_DIR="$root/run"
           node --version
+          uname -m
           xcodebuild -version
           npm install --prefix "$root" --no-audit --no-fund agent-browser@0.43.0 appium@3.0.0
           export PATH="$root/node_modules/.bin:$PATH"
