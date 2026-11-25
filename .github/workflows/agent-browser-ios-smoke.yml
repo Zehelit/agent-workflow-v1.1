@@ -69,7 +69,7 @@ jobs:
           ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
           date -u '+AGWF_IOS_APPIUM_START %FT%TZ'
           wda_project="$(python3 -c 'import pathlib,sys; xs=list(pathlib.Path(sys.argv[1]).glob("**/appium-webdriveragent/WebDriverAgent.xcodeproj")); assert len(xs)==1, xs; print(xs[0])' "$APPIUM_HOME/node_modules")"
-          defaults='{"appium:webDriverAgentUrl":"http://127.0.0.1:8100","appium:platformVersion":"18.5"}'
+          defaults='{"appium:webDriverAgentUrl":"http://127.0.0.1:8100","appium:platformVersion":"18.5","appium:isHeadless":true}'
           appium --address 127.0.0.1 --port 4723 --default-capabilities "$defaults" >"$root/appium.log" 2>&1 &
           appium_pid="$!"
           date -u '+AGWF_IOS_BOOT_BEGIN %FT%TZ'
