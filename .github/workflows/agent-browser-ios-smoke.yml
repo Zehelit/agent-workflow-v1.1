@@ -10,7 +10,7 @@ permissions:
 jobs:
   ios-safari:
     runs-on: macos-15-intel
-    timeout-minutes: 14
+    timeout-minutes: 18
     steps:
       - name: Read an open demo catalog in Mobile Safari
         shell: bash
@@ -49,13 +49,14 @@ jobs:
           }
           trap cleanup EXIT
           ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
+          date -u '+AGWF_IOS_APPIUM_START %FT%TZ'
+          appium --address 127.0.0.1 --port 4723 >"$root/appium.log" 2>&1 &
+          appium_pid="$!"
           date -u '+AGWF_IOS_BOOT_BEGIN %FT%TZ'
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
           xcrun simctl list devices --json | python3 -c 'import json,sys; devices=[d for ds in json.load(sys.stdin)["devices"].values() for d in ds]; match=[d for d in devices if d["udid"]==sys.argv[1]]; print("AGWF_IOS_DEVICE_STATE",len(match),[d["state"] for d in match],flush=True); assert len(match)==1 and match[0]["state"]=="Booted"; print("AGWF_IOS_BOOTED",match[0]["name"])' "$device"
-          appium --address 127.0.0.1 --port 4723 >"$root/appium.log" 2>&1 &
-          appium_pid="$!"
-          deadline=$((SECONDS + 40))
+          deadline=$((SECONDS + 135))
           until curl --silent --fail --max-time 2 http://127.0.0.1:4723/status | python3 -c 'import json,sys; data=sys.stdin.read(); sys.exit(0 if data and json.loads(data)["value"]["ready"] else 1)'; do
             kill -0 "$appium_pid"
             if [ "$SECONDS" -ge "$deadline" ]; then echo 'Appium readiness timed out'; exit 1; fi
