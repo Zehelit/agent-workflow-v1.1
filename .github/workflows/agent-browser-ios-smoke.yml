@@ -32,9 +32,17 @@ jobs:
           device="$(xcrun simctl create "$device_name" "$device_type" "$runtime")"
           ab() { agent-browser --session platform-ios --provider ios --device "$device_name" --json "$@"; }
           appium_pid=""
+          wda_build_pid=""
           cleanup() {
             result="$?"
             trap - EXIT
+            if [ -n "$wda_build_pid" ]; then
+              kill "$wda_build_pid" 2>/dev/null || true
+              wait "$wda_build_pid" 2>/dev/null || true
+            fi
+            if [ "$result" -ne 0 ] && [ -f "$root/wda-build.log" ]; then
+              tail -n 70 "$root/wda-build.log"
+            fi
             if [ "$result" -ne 0 ] && [ -f "$root/appium.log" ]; then
               tail -n 100 "$root/appium.log"
             fi
@@ -50,10 +58,17 @@ jobs:
           trap cleanup EXIT
           ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
           date -u '+AGWF_IOS_APPIUM_START %FT%TZ'
-          appium --address 127.0.0.1 --port 4723 >"$root/appium.log" 2>&1 &
+          wda_project="$(python3 -c 'import pathlib,sys; xs=list(pathlib.Path(sys.argv[1]).glob("**/appium-webdriveragent/WebDriverAgent.xcodeproj")); assert len(xs)==1, xs; print(xs[0])' "$APPIUM_HOME/node_modules")"
+          defaults="$(python3 -c 'import json,sys; print(json.dumps({"appium:usePrebuiltWDA":True,"appium:derivedDataPath":sys.argv[1],"appium:showXcodeLog":True,"appium:wdaLaunchTimeout":150000}))' "$root/wda")"
+          appium --address 127.0.0.1 --port 4723 --default-capabilities "$defaults" >"$root/appium.log" 2>&1 &
           appium_pid="$!"
           date -u '+AGWF_IOS_BOOT_BEGIN %FT%TZ'
           xcrun simctl boot "$device"
+          date -u '+AGWF_IOS_WDA_BUILD_BEGIN %FT%TZ'
+          xcodebuild build-for-testing -project "$wda_project" -scheme WebDriverAgentRunner \
+            -destination "platform=iOS Simulator,id=$device" -derivedDataPath "$root/wda" \
+            CODE_SIGNING_ALLOWED=NO >"$root/wda-build.log" 2>&1 &
+          wda_build_pid="$!"
           xcrun simctl bootstatus "$device" -b
           xcrun simctl list devices --json | python3 -c 'import json,sys; devices=[d for ds in json.load(sys.stdin)["devices"].values() for d in ds]; match=[d for d in devices if d["udid"]==sys.argv[1]]; print("AGWF_IOS_DEVICE_STATE",len(match),[d["state"] for d in match],flush=True); assert len(match)==1 and match[0]["state"]=="Booted"; print("AGWF_IOS_BOOTED",match[0]["name"])' "$device"
           deadline=$((SECONDS + 135))
@@ -63,7 +78,11 @@ jobs:
             sleep 1
           done
           date -u '+AGWF_IOS_APPIUM_READY %FT%TZ'
-          # Prepare the cold Xcode build separately from the Agent Browser CLI socket deadline.
+          wait "$wda_build_pid"
+          wda_build_pid=""
+          grep -F '** TEST BUILD SUCCEEDED **' "$root/wda-build.log"
+          python3 -c 'import pathlib,sys; root=pathlib.Path(sys.argv[1]); assert list(root.glob("Build/Products/*.xctestrun")), "No Xcode test-run manifest"; assert list(root.glob("Build/Products/**/WebDriverAgentRunner-Runner.app")), "No simulator WebDriverAgent app"; print("AGWF_IOS_WDA_PREBUILT")' "$root/wda"
+          # Prepare a real Safari session separately from the Agent Browser CLI socket deadline.
           capabilities="$(python3 -c 'import json,sys; print(json.dumps({"capabilities":{"alwaysMatch":{"platformName":"iOS","browserName":"Safari","appium:automationName":"XCUITest","appium:udid":sys.argv[1],"appium:deviceName":sys.argv[2],"appium:noReset":True}}}))' "$device" "$device_name")"
           date -u '+AGWF_IOS_WDA_WARMUP_BEGIN %FT%TZ'
           curl --silent --show-error --max-time 210 -H 'Content-Type: application/json' -d "$capabilities" http://127.0.0.1:4723/session >"$root/warmup.json"
