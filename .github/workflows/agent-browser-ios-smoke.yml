@@ -10,7 +10,7 @@ permissions:
 jobs:
   ios-safari:
     runs-on: macos-15-intel
-    timeout-minutes: 23
+    timeout-minutes: 30
     steps:
       - name: Read an open demo catalog in Mobile Safari
         shell: bash
@@ -35,6 +35,7 @@ jobs:
           ab() { agent-browser --session platform-ios --provider ios --device "$device_name" --json "$@"; }
           appium_pid=""
           wda_build_pid=""
+          wda_server_pid=""
           cleanup() {
             result="$?"
             trap - EXIT
@@ -48,7 +49,14 @@ jobs:
             if [ "$result" -ne 0 ] && [ -f "$root/appium.log" ]; then
               tail -n 100 "$root/appium.log"
             fi
+            if [ "$result" -ne 0 ] && [ -f "$root/wda-server.log" ]; then
+              tail -n 100 "$root/wda-server.log"
+            fi
             if [ "$result" -ne 0 ]; then ab close || true; fi
+            if [ -n "$wda_server_pid" ]; then
+              kill "$wda_server_pid" 2>/dev/null || true
+              wait "$wda_server_pid" 2>/dev/null || true
+            fi
             if [ -n "$appium_pid" ]; then
               kill "$appium_pid" 2>/dev/null || true
               wait "$appium_pid" 2>/dev/null || true
@@ -61,7 +69,7 @@ jobs:
           ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
           date -u '+AGWF_IOS_APPIUM_START %FT%TZ'
           wda_project="$(python3 -c 'import pathlib,sys; xs=list(pathlib.Path(sys.argv[1]).glob("**/appium-webdriveragent/WebDriverAgent.xcodeproj")); assert len(xs)==1, xs; print(xs[0])' "$APPIUM_HOME/node_modules")"
-          defaults="$(python3 -c 'import json,sys; print(json.dumps({"appium:usePrebuiltWDA":True,"appium:derivedDataPath":sys.argv[1],"appium:showXcodeLog":True,"appium:wdaLaunchTimeout":150000}))' "$root/wda")"
+          defaults='{"appium:webDriverAgentUrl":"http://127.0.0.1:8100","appium:platformVersion":"18.5"}'
           appium --address 127.0.0.1 --port 4723 --default-capabilities "$defaults" >"$root/appium.log" 2>&1 &
           appium_pid="$!"
           date -u '+AGWF_IOS_BOOT_BEGIN %FT%TZ'
@@ -84,6 +92,19 @@ jobs:
           wda_build_pid=""
           grep -F '** TEST BUILD SUCCEEDED **' "$root/wda-build.log"
           python3 -c 'import pathlib,sys; root=pathlib.Path(sys.argv[1]); assert list(root.glob("Build/Products/*.xctestrun")), "No Xcode test-run manifest"; assert list(root.glob("Build/Products/**/WebDriverAgentRunner-Runner.app")), "No simulator WebDriverAgent app"; print("AGWF_IOS_WDA_PREBUILT")' "$root/wda"
+          test_run="$(python3 -c 'import pathlib,sys; files=list(pathlib.Path(sys.argv[1]).glob("Build/Products/*.xctestrun")); assert len(files)==1, files; print(files[0])' "$root/wda")"
+          date -u '+AGWF_IOS_WDA_SERVER_START %FT%TZ'
+          USE_PORT=8100 xcodebuild -xctestrun "$test_run" \
+            -destination "platform=iOS Simulator,id=$device" -parallel-testing-enabled NO \
+            test-without-building >"$root/wda-server.log" 2>&1 &
+          wda_server_pid="$!"
+          deadline=$((SECONDS + 300))
+          until curl --silent --fail --max-time 2 http://127.0.0.1:8100/status | python3 -c 'import json,sys; raw=sys.stdin.read(); sys.exit(0 if raw and json.loads(raw)["value"].get("ready") is True else 1)'; do
+            kill -0 "$wda_server_pid"
+            if [ "$SECONDS" -ge "$deadline" ]; then echo 'WebDriverAgent readiness timed out'; exit 1; fi
+            sleep 2
+          done
+          date -u '+AGWF_IOS_WDA_SERVER_READY %FT%TZ'
           # The CLI gives a cold navigation 30 seconds. Use the same daemon action
           # with a longer receive deadline on this run's private socket.
           test -S "$AGENT_BROWSER_SOCKET_DIR/platform-ios.sock"
