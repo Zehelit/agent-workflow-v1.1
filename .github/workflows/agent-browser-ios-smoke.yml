@@ -31,9 +31,37 @@ jobs:
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro
           device="$(xcrun simctl create "$device_name" "$device_type" "$runtime")"
           ab() { agent-browser --session platform-ios --provider ios --device "$device_name" --json "$@"; }
-          trap 'ab close || true; xcrun simctl shutdown "$device" 2>/dev/null || true; xcrun simctl delete "$device" 2>/dev/null || true' EXIT
+          appium_pid=""
+          cleanup() {
+            result="$?"
+            trap - EXIT
+            if [ "$result" -ne 0 ] && [ -f "$root/appium.log" ]; then
+              tail -n 100 "$root/appium.log"
+            fi
+            if [ "$result" -ne 0 ]; then ab close || true; fi
+            if [ -n "$appium_pid" ]; then
+              kill "$appium_pid" 2>/dev/null || true
+              wait "$appium_pid" 2>/dev/null || true
+            fi
+            xcrun simctl shutdown "$device" 2>/dev/null || true
+            xcrun simctl delete "$device" 2>/dev/null || true
+            exit "$result"
+          }
+          trap cleanup EXIT
           ab device list | python3 -c 'import json,sys; r=json.load(sys.stdin); match=[d for d in r["data"]["devices"] if d["udid"]==sys.argv[1]]; assert len(match)==1 and not match[0]["isReal"]; print("AGWF_IOS_SIMULATOR",match[0]["name"],match[0]["runtime"])' "$device"
+          date -u '+AGWF_IOS_BOOT_BEGIN %FT%TZ'
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl list devices "$runtime" --json | python3 -c 'import json,sys; devices=[d for ds in json.load(sys.stdin)["devices"].values() for d in ds]; match=[d for d in devices if d["udid"]==sys.argv[1]]; assert len(match)==1 and match[0]["state"]=="Booted"; print("AGWF_IOS_BOOTED",match[0]["name"])' "$device"
+          appium --address 127.0.0.1 --port 4723 >"$root/appium.log" 2>&1 &
+          appium_pid="$!"
+          until curl --silent --fail --max-time 2 http://127.0.0.1:4723/status | python3 -c 'import json,sys; data=sys.stdin.read(); sys.exit(0 if data and json.loads(data)["value"]["ready"] else 1)'; do
+            kill -0 "$appium_pid"
+            sleep 1
+          done
+          date -u '+AGWF_IOS_APPIUM_READY %FT%TZ'
           ab open https://books.toscrape.com/
+          date -u '+AGWF_IOS_NAVIGATED %FT%TZ'
           ab snapshot -i
           heading="$(ab get text 'h1')"
           printf '%s\n' "$heading"
@@ -45,4 +73,3 @@ jobs:
           ab screenshot "$root/travel.png"
           python3 -c 'import hashlib,pathlib,struct,sys; d=pathlib.Path(sys.argv[1]).read_bytes(); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert w>0 and h>0; print("AGWF_IOS_PNG",w,h,hashlib.sha256(d).hexdigest())' "$root/travel.png"
           ab close
-          trap 'xcrun simctl shutdown "$device" 2>/dev/null || true; xcrun simctl delete "$device" 2>/dev/null || true' EXIT
