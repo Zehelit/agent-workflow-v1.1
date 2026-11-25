@@ -134,6 +134,40 @@ jobs:
           ab get text 'h1' || true
           echo 'AGWF_IOS_PROBE find-text'
           ab find text Travel click --exact || true
+          echo 'AGWF_IOS_WARM_CLI_OPEN'
+          ab open https://books.toscrape.com/catalogue/category/books/travel_2/index.html
+          echo 'AGWF_IOS_SWIPE_SETUP'
+          ab eval 'window.scrollTo(0,0); window.agwfSwipe={touchstart:0,touchmove:0,touchend:0}; for (const type of Object.keys(window.agwfSwipe)) document.addEventListener(type,()=>window.agwfSwipe[type]++,{capture:true,passive:true}); return {scroll:window.scrollY,innerHeight:innerHeight,contentHeight:document.documentElement.scrollHeight};'
+          echo 'AGWF_IOS_SWIPE_COMMAND'
+          ab swipe up 275 || true
+          sleep 1
+          echo 'AGWF_IOS_SWIPE_RESULT'
+          ab eval 'return {scroll:window.scrollY,events:window.agwfSwipe};'
+          echo 'AGWF_IOS_TAP_SETUP'
+          tap_probe="$(cat <<'JS'
+          const surface = document.createElement("div");
+          surface.id = "agwf-gesture-surface";
+          surface.style.cssText = "position:fixed;inset:0;z-index:2147483640;background:#fafafa";
+          const target = document.createElement("button");
+          target.id = "agwf-visible-target";
+          target.textContent = "Confirm mobile selection";
+          target.style.cssText = "position:absolute;left:16px;top:24px;width:120px;height:54px";
+          surface.append(target);
+          document.body.append(surface);
+          window.agwfTap = {target:0, surface:0, last:null};
+          surface.addEventListener("click", (event) => {
+            window.agwfTap[event.target === target ? "target" : "surface"]++;
+            window.agwfTap.last = {target:event.target.id, x:event.clientX, y:event.clientY, trusted:event.isTrusted};
+          });
+          const {x,y,width,height} = target.getBoundingClientRect();
+          return {x,y,width,height};
+          JS
+          )"
+          ab eval "$tap_probe"
+          echo 'AGWF_IOS_TAP_COMMAND'
+          ab tap '#agwf-visible-target' || true
+          echo 'AGWF_IOS_TAP_RESULT'
+          ab eval 'return window.agwfTap;'
           ab close
       - name: Preserve the verified Mobile Safari screenshot
         if: ${{ !cancelled() && env.AGWF_IOS_PNG != '' }}
