@@ -25,7 +25,7 @@ jobs:
           npm install --prefix "$root" --no-audit --no-fund agent-browser@0.43.0 appium@3.0.0
           export PATH="$root/node_modules/.bin:$PATH"
           agent-browser --version
-          appium driver install xcuitest@10.10.0
+          appium driver install xcuitest@10.13.1
           device_name="AGWF Safari Fixture $GITHUB_RUN_ID"
           runtime=com.apple.CoreSimulator.SimRuntime.iOS-18-5
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro
