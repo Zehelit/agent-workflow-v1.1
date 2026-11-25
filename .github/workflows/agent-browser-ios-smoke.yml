@@ -10,7 +10,7 @@ permissions:
 jobs:
   ios-safari:
     runs-on: macos-15-intel
-    timeout-minutes: 18
+    timeout-minutes: 23
     steps:
       - name: Read an open demo catalog in Mobile Safari
         shell: bash
@@ -30,6 +30,8 @@ jobs:
           runtime=com.apple.CoreSimulator.SimRuntime.iOS-18-5
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro
           device="$(xcrun simctl create "$device_name" "$device_type" "$runtime")"
+          export AGENT_BROWSER_PROVIDER=ios
+          export AGENT_BROWSER_IOS_DEVICE="$device_name"
           ab() { agent-browser --session platform-ios --provider ios --device "$device_name" --json "$@"; }
           appium_pid=""
           wda_build_pid=""
@@ -82,15 +84,37 @@ jobs:
           wda_build_pid=""
           grep -F '** TEST BUILD SUCCEEDED **' "$root/wda-build.log"
           python3 -c 'import pathlib,sys; root=pathlib.Path(sys.argv[1]); assert list(root.glob("Build/Products/*.xctestrun")), "No Xcode test-run manifest"; assert list(root.glob("Build/Products/**/WebDriverAgentRunner-Runner.app")), "No simulator WebDriverAgent app"; print("AGWF_IOS_WDA_PREBUILT")' "$root/wda"
-          # Prepare a real Safari session separately from the Agent Browser CLI socket deadline.
-          capabilities="$(python3 -c 'import json,sys; print(json.dumps({"capabilities":{"alwaysMatch":{"platformName":"iOS","browserName":"Safari","appium:automationName":"XCUITest","appium:udid":sys.argv[1],"appium:deviceName":sys.argv[2],"appium:noReset":True}}}))' "$device" "$device_name")"
-          date -u '+AGWF_IOS_WDA_WARMUP_BEGIN %FT%TZ'
-          curl --silent --show-error --max-time 210 -H 'Content-Type: application/json' -d "$capabilities" http://127.0.0.1:4723/session >"$root/warmup.json"
-          warm_session="$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1]))["value"]; assert value.get("sessionId"), value.get("message","No Safari session"); print(value["sessionId"])' "$root/warmup.json")"
-          curl --silent --show-error --fail --max-time 25 -X DELETE "http://127.0.0.1:4723/session/$warm_session" >/dev/null
-          date -u '+AGWF_IOS_WDA_WARMUP_CLOSED %FT%TZ'
-          ab open https://books.toscrape.com/
+          # The CLI gives a cold navigation 30 seconds. Use the same daemon action
+          # with a longer receive deadline on this run's private socket.
+          test -S "$AGENT_BROWSER_SOCKET_DIR/platform-ios.sock"
+          date -u '+AGWF_IOS_DAEMON_NAVIGATION_BEGIN %FT%TZ'
+          python3 - "$AGENT_BROWSER_SOCKET_DIR/platform-ios.sock" "$device_name" <<'PY'
+          import json
+          import socket
+          import sys
+          import time
+
+          catalog = "https://books.toscrape.com/"
+          request = {
+              "id": "agwf-ios-catalog-open",
+              "action": "navigate",
+              "url": catalog,
+              "waitUntil": "none",
+              "iosDevice": sys.argv[2],
+          }
+          start = time.monotonic()
+          with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+              client.settimeout(240)
+              client.connect(sys.argv[1])
+              client.sendall((json.dumps(request) + "\n").encode())
+              with client.makefile("rb") as incoming:
+                  response = json.loads(incoming.readline(1048576))
+          print("AGWF_IOS_DAEMON_NAVIGATION_SECONDS", round(time.monotonic() - start, 2))
+          print(json.dumps(response), flush=True)
+          assert response["success"] and response["data"]["url"] == catalog, response
+          PY
           date -u '+AGWF_IOS_NAVIGATED %FT%TZ'
+          ab get url | python3 -c 'import json,sys; result=json.load(sys.stdin); print(json.dumps(result)); assert result["success"] and result["data"]["url"]=="https://books.toscrape.com/"'
           selector='a[href$="/travel_2/index.html"]'
           home="$(ab eval 'return {heading:document.querySelector("h1")?.textContent.trim(), matches:[...document.links].filter(a=>a.href.endsWith("/travel_2/index.html")).length, userAgent:navigator.userAgent};')"
           printf '%s\n' "$home"
