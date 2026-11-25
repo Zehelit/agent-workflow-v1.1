@@ -101,6 +101,7 @@ jobs:
               "url": catalog,
               "waitUntil": "none",
               "iosDevice": sys.argv[2],
+              "settings": {"provider": "ios"},
           }
           start = time.monotonic()
           with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -112,6 +113,7 @@ jobs:
           print("AGWF_IOS_DAEMON_NAVIGATION_SECONDS", round(time.monotonic() - start, 2))
           print(json.dumps(response), flush=True)
           assert response["success"] and response["data"]["url"] == catalog, response
+          assert response["data"]["lifecycle"]["effectiveLaunch"]["engine"] == "safari", response
           PY
           date -u '+AGWF_IOS_NAVIGATED %FT%TZ'
           ab get url | python3 -c 'import json,sys; result=json.load(sys.stdin); print(json.dumps(result)); assert result["success"] and result["data"]["url"]=="https://books.toscrape.com/"'
@@ -125,6 +127,7 @@ jobs:
           printf '%s\n' "$category" | python3 -c 'import json,sys; v=json.load(sys.stdin)["data"]["result"]; assert v["heading"]=="Travel" and v["products"]>0 and v["path"]=="/catalogue/category/books/travel_2/index.html"'
           ab screenshot "$root/travel.png"
           python3 -c 'import hashlib,pathlib,struct,sys; d=pathlib.Path(sys.argv[1]).read_bytes(); assert d[:8] == bytes.fromhex("89504e470d0a1a0a"); w,h=struct.unpack(">II",d[16:24]); assert w>0 and h>0; print("AGWF_IOS_PNG",w,h,hashlib.sha256(d).hexdigest())' "$root/travel.png"
+          printf 'AGWF_IOS_PNG=%s\n' "$root/travel.png" >>"$GITHUB_ENV"
           echo 'AGWF_IOS_PROBE snapshot'
           ab snapshot -i || true
           echo 'AGWF_IOS_PROBE get-text'
@@ -132,3 +135,11 @@ jobs:
           echo 'AGWF_IOS_PROBE find-text'
           ab find text Travel click --exact || true
           ab close
+      - name: Preserve the verified Mobile Safari screenshot
+        if: ${{ !cancelled() && env.AGWF_IOS_PNG != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agwf-mobile-safari-travel
+          path: ${{ env.AGWF_IOS_PNG }}
+          if-no-files-found: error
+          retention-days: 1
